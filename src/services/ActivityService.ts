@@ -12,11 +12,9 @@ export default class ActivityService {
         return this.instance;
     }
 
-    async createActivity(activity: Activity) {
+    async createActivity(activity: Activity) : Promise<string> {
         console.log("activity: ", activity)
-        const someResult = await invoke<Activity>('add_activity', { activity });
-        console.log("someResult: ", someResult);
-        return null;    //this.api.request('POST', '/activity', activity);
+        return await invoke<string>('add_activity', { activity });
     }
 
     async getActivities(monthValue: DateRange) : Promise<Activity[]> {

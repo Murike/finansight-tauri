@@ -32,7 +32,7 @@
                 <div v-for="tag in newActivity.tags" class="badge">{{ tag.name }}</div>
             </div>
         </div>
-        <button tabindex="6" class="transition-all btn btn-circle btn-primary absolute left-1/2 -bottom-6 transform -translate-x-1/2 shadow-lg" @click="createActivity">
+        <button :disabled="saveDisabled" tabindex="6" class="transition-all btn btn-circle btn-primary absolute left-1/2 -bottom-6 transform -translate-x-1/2 shadow-lg" @click="createActivity">
             <Plus class="h-6 w-6" fill="none"></Plus>
         </button>
     </div>
@@ -70,6 +70,7 @@ const showTagSuggestions = ref<boolean>(false);
 const popularTags = ref<Tag[]>([]);
 const currentTags = ref<Tag[]>([]);
 const typingTag = ref<string>('');
+const saveDisabled = ref<boolean>(false);
 const activeSuggestion = ref<number>(-1);
 const defaultActivity = ref<Activity>({
     value : 0.0,
@@ -117,12 +118,15 @@ const moveSuggestion = (variation: number) => {
 }
 
 const createActivity = async()=>{
+    saveDisabled.value = true;
     const result = await ActivityService.getInstance().createActivity(newActivity.value);
+    console.log("Activity create result: ", result)
     if(result){
         emit('activity-created')
         await resetForm();
         descriptionRef.value?.focus();
     }
+    saveDisabled.value = false;
 }
 
 const resetForm = async() => {
