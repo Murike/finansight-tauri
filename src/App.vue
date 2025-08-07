@@ -1,7 +1,9 @@
 <template>
-  <div class="p-7">
-    <Activities></Activities>
-</div>
+  <div class="h-screen overflow-hidden">
+    <div class="h-full p-7 overflow-hidden">
+      <Activities></Activities>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">

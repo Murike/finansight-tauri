@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 use uuid::Uuid;
@@ -17,6 +17,8 @@ struct Activity {
     operation: Operation,
     description: String,
     date: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tags: Option<Vec<Tag>>,
 }
@@ -37,6 +39,18 @@ struct Tag {
     name: String,
 }
 
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StaticFilter {
+    id: String,
+    initial_date: String,
+    final_date: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tags: Option<Vec<Tag>>,
+}
+
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Operation {
@@ -56,6 +70,13 @@ fn db_init(app_handle: &tauri::AppHandle) -> Result<Connection, rusqlite::Error>
 
     // Open a connection to the database
     let conn = Connection::open(db_path)?;
+
+    // conn.execute("DROP TABLE IF EXISTS activity_tag;", [])?;
+    // conn.execute("DROP TABLE IF EXISTS filter_tag;", [])?;
+    // conn.execute("DROP TABLE IF EXISTS tag;", [])?;
+    // conn.execute("DROP TABLE IF EXISTS activity;", [])?;
+    // conn.execute("DROP TABLE IF EXISTS monetary_medium;", [])?;
+    // conn.execute("DROP TABLE IF EXISTS static_filters;", [])?;
 
     // Create the 'users' table if it doesn't exist
     conn.execute(
@@ -83,7 +104,9 @@ fn db_init(app_handle: &tauri::AppHandle) -> Result<Connection, rusqlite::Error>
             operation TEXT NOT NULL CHECK (operation IN ('credit', 'debit')),
             description TEXT NOT NULL,
             date TEXT NOT NULL,
-            FOREIGN KEY (medium_id) REFERENCES monetary_medium(id)
+            parent_id TEXT,
+            FOREIGN KEY (medium_id) REFERENCES monetary_medium(id),
+            FOREIGN KEY (parent_id) REFERENCES activity(id)
         )",
         [],
     )?;
@@ -94,6 +117,26 @@ fn db_init(app_handle: &tauri::AppHandle) -> Result<Connection, rusqlite::Error>
             tag_id TEXT NOT NULL,
             PRIMARY KEY (activity_id, tag_id),
             FOREIGN KEY (activity_id) REFERENCES activity(id),
+            FOREIGN KEY (tag_id) REFERENCES tag(id)
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS static_filters (
+            id TEXT PRIMARY KEY,
+            initial_date TEXT NOT NULL,
+            final_date TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS filter_tag (
+            filter_id TEXT NOT NULL,
+            tag_id TEXT NOT NULL,
+            PRIMARY KEY (filter_id, tag_id),
+            FOREIGN KEY (filter_id) REFERENCES static_filters(id),
             FOREIGN KEY (tag_id) REFERENCES tag(id)
         )",
         [],
@@ -142,7 +185,7 @@ fn get_activities<'a>(state: State<'a, DbState>) -> Result<Vec<Activity>, String
 
     // Query to get all activities with their associated monetary medium
     let mut stmt = conn.prepare(
-        "SELECT a.id, a.value, a.medium_id, a.operation, a.description, a.date, 
+        "SELECT a.id, a.value, a.medium_id, a.operation, a.description, a.date, a.parent_id,
                 m.name as medium_name, m.is_valid_for_credit 
          FROM activity a 
          JOIN monetary_medium m ON a.medium_id = m.id"
@@ -160,12 +203,13 @@ fn get_activities<'a>(state: State<'a, DbState>) -> Result<Vec<Activity>, String
             value: row.get(1)?,
             medium: MonetaryMedium {
                 id: row.get(2)?,
-                name: row.get(6)?,
-                is_valid_for_credit: row.get(7)?
+                name: row.get(7)?,
+                is_valid_for_credit: row.get(8)?
             },
             operation,
             description: row.get(4)?,
             date: row.get(5)?,
+            parent_id: row.get(6)?,
             tags: None  // Will be populated below
         })
     }).map_err(|e| e.to_string())?;
@@ -175,9 +219,6 @@ fn get_activities<'a>(state: State<'a, DbState>) -> Result<Vec<Activity>, String
     // Process each activity and fetch its tags
     for activity_result in activity_iter {
         let mut activity = activity_result.map_err(|e| e.to_string())?;
-        
-        println!("Current activity: {:#?}", activity.description);
-
 
         // Fetch tags for this activity
         if let Some(activity_id) = &activity.id {
@@ -193,14 +234,53 @@ fn get_activities<'a>(state: State<'a, DbState>) -> Result<Vec<Activity>, String
 
 // Helper function to get tags for a specific activity
 fn get_activity_tags(conn: &Connection, activity_id: &str) -> Result<Vec<Tag>, rusqlite::Error> {
-    let mut stmt = conn.prepare(
-        "SELECT t.id, t.name 
+    get_related_tags(&conn, "SELECT t.id, t.name 
          FROM tag t 
          JOIN activity_tag at ON t.id = at.tag_id 
-         WHERE at.activity_id = ?"
+         WHERE at.activity_id = ?", activity_id)
+}
+
+#[tauri::command]
+fn get_static_filters(state: State<DbState>) -> Result<Vec<StaticFilter>, String> {
+    let mut db_guard = state.db.lock().unwrap();
+    let conn = db_guard.as_mut().ok_or("Failure connecting to database")?;
+
+    let mut stmt = conn.prepare("SELECT * FROM static_filters").map_err(|e| e.to_string())?;
+    let filter_iter = stmt.query_map([], |row| {
+        Ok(StaticFilter {
+            id: row.get(0)?,
+            initial_date: row.get(1)?,
+            final_date: row.get(2)?,
+            tags: None,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut filters = Vec::new();
+    for filter in filter_iter {
+        let mut local_filter = filter.map_err(|e| e.to_string())?;
+
+        let tags = get_filter_tags(&conn, &local_filter.id).map_err(|e| e.to_string())?;
+        local_filter.tags = if tags.is_empty() { None } else { Some(tags) };
+        filters.push(local_filter);
+    }
+    
+    Ok(filters)
+}
+
+// Helper function to get tags for a specific activity
+fn get_filter_tags(conn: &Connection, filter_id: &str) -> Result<Vec<Tag>, rusqlite::Error> {
+    get_related_tags(&conn, "SELECT t.id, t.name 
+         FROM tag t 
+         JOIN filter_tag at ON t.id = at.tag_id 
+         WHERE at.filter_id = ?", filter_id)
+}
+
+// Helper function to get tags for a specific activity
+fn get_related_tags(conn: &Connection, query: &str, reference_id: &str) -> Result<Vec<Tag>, rusqlite::Error> {
+    let mut stmt = conn.prepare(query
     )?;
     
-    let tag_iter = stmt.query_map([activity_id], |row| {
+    let tag_iter = stmt.query_map([reference_id], |row| {
         Ok(Tag {
             id: Some(row.get(0)?),
             name: row.get(1)?
@@ -210,6 +290,28 @@ fn get_activity_tags(conn: &Connection, activity_id: &str) -> Result<Vec<Tag>, r
     let mut tags = Vec::new();
     for tag in tag_iter {
         tags.push(tag?);
+    }
+    
+    Ok(tags)
+}
+
+
+#[tauri::command]
+fn get_suggestion_tags(state: State<DbState>) -> Result<Vec<Tag>, String> {
+    let mut db_guard = state.db.lock().unwrap();
+    let conn = db_guard.as_mut().ok_or("Failure connecting to database")?;
+
+    let mut stmt = conn.prepare("SELECT * FROM tag LIMIT 100").map_err(|e| e.to_string())?;
+    let tag_iter = stmt.query_map([], |row| {
+        Ok(Tag {
+            id: Some(row.get(0)?),
+            name: row.get(1)?
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut tags = Vec::new();
+    for tag in tag_iter {
+        tags.push(tag.map_err(|e| e.to_string())?);
     }
     
     Ok(tags)
@@ -241,9 +343,9 @@ fn add_activity(state: State<DbState>, activity: Activity) -> Result<String, Str
     
     // Insert the activity
     conn.execute(
-        "INSERT INTO activity (id, value, medium_id, operation, description, date) 
-         VALUES (?, ?, ?, ?, ?, ?)",
-        [
+        "INSERT INTO activity (id, value, medium_id, operation, description, date, parent_id) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+         params![
             &activity_id,
             &activity.value.to_string(),
             &activity.medium.id,
@@ -253,6 +355,7 @@ fn add_activity(state: State<DbState>, activity: Activity) -> Result<String, Str
             },
             &activity.description,
             &activity.date,
+            activity.parent_id,
         ],
     ).map_err(|e| e.to_string())?;
     
@@ -319,7 +422,13 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, get_activities, add_activity, get_monetary_media, delete_activity])
+        .invoke_handler(tauri::generate_handler![greet, 
+                                                 get_activities, 
+                                                 add_activity, 
+                                                 get_monetary_media, 
+                                                 delete_activity, 
+                                                 get_suggestion_tags,
+                                                 get_static_filters])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

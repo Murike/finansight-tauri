@@ -60,6 +60,17 @@ const currentPaymentsList = computed(() => {
 })
 const suggestedTags = computed(()=> popularTags.value.filter((elem: Tag) => elem.name.includes(typingTag.value)))
 
+const createDefaultActivity = () => {
+    return {
+        value : 0.0,
+        medium: {name : 'Pagamento', id: '-1', isValidForCredit: true},
+        description: '',
+        operation: Operation.credit,
+        tags: [],
+        date: dayjs().format('YYYY-MM-DD')  
+    }
+}
+
 const inputMonetaryOptions = {
     currency: 'BRL',
     autoDecimalDigits: true
@@ -68,19 +79,10 @@ const inputMonetaryOptions = {
 const descriptionRef = ref<HTMLInputElement | null>(null);
 const showTagSuggestions = ref<boolean>(false);
 const popularTags = ref<Tag[]>([]);
-const currentTags = ref<Tag[]>([]);
 const typingTag = ref<string>('');
 const saveDisabled = ref<boolean>(false);
 const activeSuggestion = ref<number>(-1);
-const defaultActivity = ref<Activity>({
-    value : 0.0,
-    medium: {name : 'Pagamento', id: '-1', isValidForCredit: true},
-    description: '',
-    operation: Operation.credit,
-    tags: [],
-    date: dayjs().format('YYYY-MM-DD')  
-})
-const newActivity = ref<Activity>(defaultActivity.value);
+const newActivity = ref<Activity>(createDefaultActivity());
 const monetaryMedia = ref<MonetaryMedium[]>([])
 
 watch(typingTag, () => {
@@ -90,8 +92,6 @@ watch(typingTag, () => {
 onMounted(async () => {
     monetaryMedia.value =  await ActivityService.getInstance().getMonetaryMedia();
     popularTags.value =  await ActivityService.getInstance().getSuggestionTags();
-
-    console.log("popularTags.value: ", popularTags.value)
 })
 
 const handleBlur = ()=>{
@@ -104,10 +104,16 @@ const addTag = (tag:Tag) => {
 }
 
 const testTag = () => {
+
+    console.log("suggestedTags: ", suggestedTags.value)
+    console.log("activeSuggestion.value: ", activeSuggestion.value)
+    console.log("popularTags.value: ", popularTags.value)
+
+
     if(suggestedTags.value.length == 0 || activeSuggestion.value == -1){
         newActivity.value.tags?.push({id: null, name: typingTag.value})
     }else
-        newActivity.value.tags?.push(popularTags.value[activeSuggestion.value])
+        newActivity.value.tags?.push(suggestedTags.value[activeSuggestion.value])
 
     typingTag.value = '';    
 }
@@ -120,23 +126,14 @@ const moveSuggestion = (variation: number) => {
 const createActivity = async()=>{
     saveDisabled.value = true;
     const result = await ActivityService.getInstance().createActivity(newActivity.value);
-    console.log("Activity create result: ", result)
     if(result){
         emit('activity-created')
-        await resetForm();
+        newActivity.value = createDefaultActivity();
         descriptionRef.value?.focus();
     }
     saveDisabled.value = false;
 }
 
-const resetForm = async() => {
-    newActivity.value = defaultActivity.value;
-    currentTags.value = [];
-
-    console.log("defaultActivity.value: ", defaultActivity.value)
-    console.log("newActivity.value: ", newActivity.value)
-
-}
 
 </script>
 <style lang="sass">

@@ -21,8 +21,8 @@
                         </button>
                     </div>
                 </div>
-                <div class="col flex flex-row">
-                    <div v-for="tag in data.tags" class="badge">{{ tag.name }}</div>
+                <div class="col flex flex-row gap-0.5 py-0.5">
+                    <div v-for="tag in data.tags" class="badge cursor-pointer" @click="emitTag(tag)">{{ tag.name }}</div>
                 </div>
             </div>
         </div>
@@ -32,9 +32,11 @@
 import { TransactionCredit, TransactionDebit } from '../../components/icons';
 import { Operation, type Activity } from '../../models/Activity';
 import dayjs from 'dayjs';
+import { Tag } from '../../models/Activity';
 
 const emit = defineEmits<{
-    (e: 'delete-activity', activityId: string): void
+    (e: 'delete-activity', activityId: string): void,
+    (e: 'tag-clicked', tag: Tag): void,
 }>();
 
 defineProps<{
@@ -43,5 +45,9 @@ defineProps<{
 
 const deleteActivity = async(activityId: string)=>{
     emit('delete-activity', activityId)
+}
+
+const emitTag = async(tag: Tag)=>{
+    emit('tag-clicked', tag)
 }
 </script>

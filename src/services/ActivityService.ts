@@ -13,7 +13,6 @@ export default class ActivityService {
     }
 
     async createActivity(activity: Activity) : Promise<string> {
-        console.log("activity: ", activity)
         return await invoke<string>('add_activity', { activity });
     }
 
@@ -27,7 +26,6 @@ export default class ActivityService {
     }
 
     async deleteActivity(activityId: string) : Promise<number> {
-        console.log("activityId: ", activityId)
         try{
             return await invoke<number>('delete_activity', {activityId});
         }catch(e: any){
@@ -37,13 +35,11 @@ export default class ActivityService {
     }
 
     async getMonetaryMedia() : Promise<MonetaryMedium[]>{
-        const monetaryMediaData = await invoke<MonetaryMedium[]>('get_monetary_media');
-        console.log("monetaryMediaData: ", monetaryMediaData)
-        return monetaryMediaData;    //this.api.request('GET', '/activity/monetary-media')
+        return await invoke<MonetaryMedium[]>('get_monetary_media');
     }
 
     async getSuggestionTags() : Promise<Tag[]>{
-        return [];    //this.api.request('GET', '/activity/tag')
+        return await invoke<Tag[]>('get_suggestion_tags');
     }
 
 }
