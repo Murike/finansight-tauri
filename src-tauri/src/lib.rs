@@ -1,61 +1,14 @@
+mod models;
+
 use rusqlite::{params, Connection};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 use uuid::Uuid;
+use crate::models::{Activity, MonetaryMedium, Tag, StaticFilter, Operation, ActivityFilter};
+
 
 pub struct DbState {
     db: Mutex<Option<Connection>>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Activity {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<String>,
-    value: f64,
-    medium: MonetaryMedium,
-    operation: Operation,
-    description: String,
-    date: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tags: Option<Vec<Tag>>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[derive(Debug)]
-#[serde(rename_all = "camelCase")]
-struct MonetaryMedium {
-    name: String,
-    id: String,
-    is_valid_for_credit: bool,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Tag {
-    id: Option<String>,
-    name: String,
-}
-
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StaticFilter {
-    id: String,
-    initial_date: String,
-    final_date: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tags: Option<Vec<Tag>>,
-}
-
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum Operation {
-    Credit,
-    Debit,
 }
 
 
@@ -179,17 +132,42 @@ async fn get_monetary_media<'a>(state: State<'a, DbState>) -> Result<Vec<Monetar
 }
 
 #[tauri::command]
-fn get_activities<'a>(state: State<'a, DbState>) -> Result<Vec<Activity>, String>{
+fn get_activities<'a>(state: State<'a, DbState>, filters: Option<ActivityFilter>) -> Result<Vec<Activity>, String>{
     let db_guard = state.db.lock().unwrap();
     let conn = db_guard.as_ref().ok_or("Couldn't recover database connection")?;
 
-    // Query to get all activities with their associated monetary medium
-    let mut stmt = conn.prepare(
-        "SELECT a.id, a.value, a.medium_id, a.operation, a.description, a.date, a.parent_id,
-                m.name as medium_name, m.is_valid_for_credit 
-         FROM activity a 
-         JOIN monetary_medium m ON a.medium_id = m.id"
-    ).map_err(|e| e.to_string())?;
+    let where_clause : String = match &filters {
+        Some(filter) => {
+            let mut where_statements : Vec<String> = Vec::new();
+            
+            if let Some(date) = &filter.initial_date {
+                where_statements.push(format!(" a.date > '{}' ", *date));
+            }
+
+            if let Some(date) = &filter.final_date {
+                where_statements.push(format!(" a.date < '{}' ", *date));
+            }
+
+            if !where_statements.is_empty() {
+                format!(" WHERE {} ", where_statements.join(" AND "))
+            } else {
+                String::from("")
+            }
+        },
+        None => String::from("")
+    };
+    
+    let formatted_query = format!("
+        SELECT a.id, a.value, a.medium_id, a.operation, a.description, a.date, a.parent_id,
+            m.name as medium_name, m.is_valid_for_credit 
+        FROM activity a 
+        JOIN monetary_medium m ON a.medium_id = m.id
+        {}", &where_clause);
+
+    println!("{}", formatted_query);
+
+
+    let mut stmt = conn.prepare(&formatted_query).map_err(|e| e.to_string())?;
 
     let activity_iter = stmt.query_map([], |row| {
         let operation = match (row.get::<_, String>(3)?).as_str() {
@@ -225,8 +203,30 @@ fn get_activities<'a>(state: State<'a, DbState>) -> Result<Vec<Activity>, String
             let tags = get_activity_tags(&conn, activity_id).map_err(|e| e.to_string())?;
             activity.tags = if tags.is_empty() { None } else { Some(tags) };
         }
-        
-        activities.push(activity);
+
+        // Apply filter rules:
+        // 1) No filter -> include
+        // 2) Filter with no tags -> include
+        // 3) Filter with tags -> include only if all filter tag ids are present in activity tags
+        match &filters {
+            None => activities.push(activity),
+            Some(filter) => {
+                match &filter.tags {
+                    None => activities.push(activity),
+                    Some(filter_tags) if filter_tags.is_empty() => activities.push(activity),
+                    Some(filter_tags) => {
+                        if let Some(activity_tags) = &activity.tags {
+                            let is_subset = filter_tags
+                                .iter()
+                                .all(|ft| activity_tags.iter().any(|at| at.id == ft.id));
+                            if is_subset {
+                                activities.push(activity);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Ok(activities)
@@ -267,7 +267,6 @@ fn get_static_filters(state: State<DbState>) -> Result<Vec<StaticFilter>, String
     Ok(filters)
 }
 
-// Helper function to get tags for a specific activity
 fn get_filter_tags(conn: &Connection, filter_id: &str) -> Result<Vec<Tag>, rusqlite::Error> {
     get_related_tags(&conn, "SELECT t.id, t.name 
          FROM tag t 
@@ -275,7 +274,6 @@ fn get_filter_tags(conn: &Connection, filter_id: &str) -> Result<Vec<Tag>, rusql
          WHERE at.filter_id = ?", filter_id)
 }
 
-// Helper function to get tags for a specific activity
 fn get_related_tags(conn: &Connection, query: &str, reference_id: &str) -> Result<Vec<Tag>, rusqlite::Error> {
     let mut stmt = conn.prepare(query
     )?;

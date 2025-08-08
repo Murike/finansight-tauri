@@ -1,6 +1,7 @@
 import type { Activity, MonetaryMedium, Tag } from "../models/Activity";
 import type { DateRange } from "../models/ActivityDate";
 import { invoke } from "@tauri-apps/api/core";
+import { ActivityFilter, StaticFilter } from "../models/Filters";
 
 export default class ActivityService {
     private static instance: ActivityService = new ActivityService();
@@ -16,11 +17,10 @@ export default class ActivityService {
         return await invoke<string>('add_activity', { activity });
     }
 
-    async getActivities(monthValue: DateRange) : Promise<Activity[]> {
+    async getActivities(monthValue: DateRange, filters?: ActivityFilter) : Promise<Activity[]> {
         console.log("monthValue: ", monthValue)
-        // The invoke function automatically handles serialization/deserialization
-        // between Rust and TypeScript thanks to Tauri's built-in serde support
-        const activities = await invoke<Activity[]>('get_activities');
+        
+        const activities = await invoke<Activity[]>('get_activities', {filters});
         console.log("activities: ", activities);
         return activities;
     }
@@ -40,6 +40,10 @@ export default class ActivityService {
 
     async getSuggestionTags() : Promise<Tag[]>{
         return await invoke<Tag[]>('get_suggestion_tags');
+    }
+
+    async getStaticFilters() : Promise<StaticFilter[]>{
+        return await invoke<StaticFilter[]>('get_static_filters');
     }
 
 }

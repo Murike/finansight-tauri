@@ -14,7 +14,25 @@ select * from activity_tag
 
 select * from activity
 
-COMMIT;
+
+select * from static_filters
+
+select * from filter_tag
+
+
+INSERT INTO static_filters
+VALUES ('1', '2025-08-01', '2025-08-31')
+
+
+
+INSERT INTO filter_tag
+VALUES
+('1', '04ecd838-6d9d-4cde-bca9-5cae356dd785')
+
+
+
+SELECT a.*, b.* FROM static_filters a, filter_tag b
+WHERE a.id = b.filter_id;
 
 
 SELECT a.id, a.value, a.medium_id, a.operation, a.description, a.date, 

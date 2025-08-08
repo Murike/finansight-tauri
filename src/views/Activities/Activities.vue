@@ -9,7 +9,7 @@
                     <div class="flex flex-col gap-4 py-4 px-2">
                         <ActivityConsolidated 
                             class="w-full"
-                            v-for="activity of activities" 
+                            v-for="activity of filter1Activities" 
                             :key="activity.id"
                             :data="activity" 
                             @delete-activity="deleteActivity"
@@ -60,8 +60,10 @@ import type { DateRange } from '../../models/ActivityDate'
 import ActivityConsolidated from './ActivityConsolidated.vue'
 import { utils } from '../../shared/utils'
 import dayjs from 'dayjs';
+import { ActivityFilter } from '../../models/Filters'
 
 const activities = ref<Activity[]>([])
+const filter1Activities = ref<Activity[]>([])
 const appliedDateRange = ref<DateRange>(utils.getMonthInitialFinal());
 const currentMonth = computed(() => utils.getMonthsList()[dayjs.utc(appliedDateRange.value.initialDate, undefined, true).month()])
 
@@ -85,6 +87,16 @@ const onMonthChanged = async(monthValue: DateRange) => {
 
 const loadActivities = async() => {
     activities.value = await ActivityService.getInstance().getActivities(appliedDateRange.value);
+    const staticFilters = await ActivityService.getInstance().getStaticFilters();
+    for(const filter of staticFilters){
+        const activityFilter : ActivityFilter = {
+            initialDate: filter.initialDate,
+            finalDate: filter.finalDate,
+            tags: filter.tags
+        };
+
+        filter1Activities.value = await ActivityService.getInstance().getActivities(appliedDateRange.value, activityFilter);
+    }
     // load filters list
     // load filters activities
 }
