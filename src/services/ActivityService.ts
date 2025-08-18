@@ -1,5 +1,4 @@
 import type { Activity, MonetaryMedium, Tag } from "../models/Activity";
-import type { DateRange } from "../models/ActivityDate";
 import { invoke } from "@tauri-apps/api/core";
 import { ActivityFilter, StaticFilter } from "../models/Filters";
 
@@ -17,12 +16,24 @@ export default class ActivityService {
         return await invoke<string>('add_activity', { activity });
     }
 
-    async getActivities(monthValue: DateRange, filters?: ActivityFilter) : Promise<Activity[]> {
-        console.log("monthValue: ", monthValue)
-        
+    async getActivities(filters?: ActivityFilter) : Promise<Activity[]> {
         const activities = await invoke<Activity[]>('get_activities', {filters});
         console.log("activities: ", activities);
         return activities;
+    }
+
+    async addFilterTag(filterId : string, tag: Tag) : Promise<StaticFilter> {
+        const tagId = tag.id;
+        return await invoke<StaticFilter>('add_filter_tag', {filterId, tagId});
+    }
+
+    async removeFilterTag(filterId : string, tag: Tag) : Promise<StaticFilter> {
+        const tagId = tag.id;
+        return await invoke<StaticFilter>('remove_filter_tag', {filterId, tagId});
+    }
+
+    async updateFilterDaterange(filter : StaticFilter) : Promise<StaticFilter> {
+        return await invoke<StaticFilter>('update_filter_daterange', {filter});
     }
 
     async deleteActivity(activityId: string) : Promise<number> {

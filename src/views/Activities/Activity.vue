@@ -58,7 +58,7 @@ const formattedValue = computed({
 const currentPaymentsList = computed(() => {
     return [...monetaryMedia.value.filter(elem => (newActivity.value.operation == Operation.debit) || elem.isValidForCredit), {name: 'Pagamento', id: '-1', isValidForCredit: true}]
 })
-const suggestedTags = computed(()=> popularTags.value.filter((elem: Tag) => elem.name.includes(typingTag.value)))
+const suggestedTags = computed(()=> popularTags.value.filter((elem: Tag) => elem.name.toLowerCase().includes(typingTag.value.toLowerCase())))
 
 const createDefaultActivity = () => {
     return {
@@ -104,14 +104,8 @@ const addTag = (tag:Tag) => {
 }
 
 const testTag = () => {
-
-    console.log("suggestedTags: ", suggestedTags.value)
-    console.log("activeSuggestion.value: ", activeSuggestion.value)
-    console.log("popularTags.value: ", popularTags.value)
-
-
     if(suggestedTags.value.length == 0 || activeSuggestion.value == -1){
-        newActivity.value.tags?.push({id: null, name: typingTag.value})
+        newActivity.value.tags?.push({id: null, name: typingTag.value.toLowerCase()})
     }else
         newActivity.value.tags?.push(suggestedTags.value[activeSuggestion.value])
 

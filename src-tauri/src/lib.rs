@@ -164,9 +164,6 @@ fn get_activities<'a>(state: State<'a, DbState>, filters: Option<ActivityFilter>
         JOIN monetary_medium m ON a.medium_id = m.id
         {}", &where_clause);
 
-    println!("{}", formatted_query);
-
-
     let mut stmt = conn.prepare(&formatted_query).map_err(|e| e.to_string())?;
 
     let activity_iter = stmt.query_map([], |row| {
@@ -218,7 +215,7 @@ fn get_activities<'a>(state: State<'a, DbState>, filters: Option<ActivityFilter>
                         if let Some(activity_tags) = &activity.tags {
                             let is_subset = filter_tags
                                 .iter()
-                                .all(|ft| activity_tags.iter().any(|at| at.id == ft.id));
+                                .any(|ft| activity_tags.iter().any(|at| at.id == ft.id));
                             if is_subset {
                                 activities.push(activity);
                             }
@@ -267,11 +264,77 @@ fn get_static_filters(state: State<DbState>) -> Result<Vec<StaticFilter>, String
     Ok(filters)
 }
 
+fn get_filters_actual(conn: &Connection, filter_id: Option<&str>) -> Result<Vec<StaticFilter>, String> {
+    let formatted_query = if let Some(id) = filter_id {
+        format!("SELECT * FROM static_filters WHERE id = {} ", id)
+    } else {
+        format!("SELECT * FROM static_filters")
+    };
+
+    let mut stmt = conn.prepare(&formatted_query).map_err(|e| e.to_string())?;
+    let filter_iter = stmt.query_map([], |row| {
+        Ok(StaticFilter {
+            id: row.get(0)?,
+            initial_date: row.get(1)?,
+            final_date: row.get(2)?,
+            tags: None,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut filters = Vec::new();
+    for filter in filter_iter {
+        let mut local_filter = filter.map_err(|e| e.to_string())?;
+
+        let tags = get_filter_tags(&conn, &local_filter.id).map_err(|e| e.to_string())?;
+        local_filter.tags = if tags.is_empty() { None } else { Some(tags) };
+        filters.push(local_filter);
+    }
+
+    Ok(filters)
+}
+
 fn get_filter_tags(conn: &Connection, filter_id: &str) -> Result<Vec<Tag>, rusqlite::Error> {
     get_related_tags(&conn, "SELECT t.id, t.name 
          FROM tag t 
          JOIN filter_tag at ON t.id = at.tag_id 
          WHERE at.filter_id = ?", filter_id)
+}
+
+
+#[tauri::command]
+fn update_filter_daterange(state: State<DbState>, filter: StaticFilter) -> Result<StaticFilter, String> {
+    let mut db_guard = state.db.lock().unwrap();
+    let conn = db_guard.as_mut().ok_or("Failure in recovering connection for query processing")?;
+
+    conn.execute("UPDATE static_filters SET initial_date = ?, final_date = ?  WHERE id = ?", [&filter.initial_date, &filter.final_date, &filter.id]).map_err(|e| e.to_string())?;
+
+    Ok(filter)
+}
+
+
+#[tauri::command]
+fn add_filter_tag(state: State<DbState>, filter_id: &str, tag_id: &str) -> Result<StaticFilter, String> {
+    let mut db_guard = state.db.lock().unwrap();
+    let conn = db_guard.as_mut().ok_or("Failure in recovering connection for query processing")?;
+
+    conn.execute("INSERT INTO filter_tag VALUES (?, ?)", [&filter_id, &tag_id]).map_err(|e| e.to_string())?;
+    let filters = get_filters_actual(&conn, Some(filter_id)).map_err(|e| e.to_string())?;
+    let filter = filters.into_iter().next().ok_or("Can't fetch updated filter from database.")?;
+
+    Ok(filter)
+}
+
+
+#[tauri::command]
+fn remove_filter_tag(state: State<DbState>, filter_id: &str, tag_id: &str) -> Result<StaticFilter, String> {
+    let mut db_guard = state.db.lock().unwrap();
+    let conn = db_guard.as_mut().ok_or("Failure in recovering connection for query processing")?;
+
+    conn.execute("DELETE FROM filter_tag WHERE filter_id = ? AND tag_id = ?", [&filter_id, &tag_id]).map_err(|e| e.to_string())?;
+    let filters = get_filters_actual(&conn, Some(filter_id)).map_err(|e| e.to_string())?;
+    let filter = filters.into_iter().next().ok_or("Can't fetch updated filter from database.")?;
+
+    Ok(filter)
 }
 
 fn get_related_tags(conn: &Connection, query: &str, reference_id: &str) -> Result<Vec<Tag>, rusqlite::Error> {
@@ -292,7 +355,6 @@ fn get_related_tags(conn: &Connection, query: &str, reference_id: &str) -> Resul
     
     Ok(tags)
 }
-
 
 #[tauri::command]
 fn get_suggestion_tags(state: State<DbState>) -> Result<Vec<Tag>, String> {
@@ -426,7 +488,10 @@ pub fn run() {
                                                  get_monetary_media, 
                                                  delete_activity, 
                                                  get_suggestion_tags,
-                                                 get_static_filters])
+                                                 get_static_filters,
+                                                 add_filter_tag,
+                                                 update_filter_daterange,
+                                                 remove_filter_tag])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

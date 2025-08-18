@@ -48,6 +48,7 @@ const deleteActivity = async(activityId: string)=>{
 }
 
 const emitTag = async(tag: Tag)=>{
+    console.log("############### CLICKED!!")
     emit('tag-clicked', tag)
 }
 </script>
